@@ -2,7 +2,7 @@ import asyncio
 import adafruit_dht
 from dataclasses import dataclass
 
-from core.peripherals import Sensor
+from .sensor import Sensor
 
 @dataclass(frozen=True)
 class DHTReading:

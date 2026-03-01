@@ -1,18 +1,19 @@
 import asyncio
 import time
+from datetime import datetime
 
-from typing import Any, List, Awaitable, Callable, List, Optional
+from typing import Any, Callable, List, Optional
 
-from core.peripherals import Sensor
-from core.dht22 import DHT22
+from .sensor import Sensor
+from .dht22 import DHT22
 
 import board
 
-OnSample = Callable[[str, Any, float], Any]
+OnSample = Callable[[Sensor, Any, float], Any]
 
-class PeripheralsManager:
+class Manager:
     """
-    handles the scheduling of when to run each peripheral service
+    handles the scheduling of when to run each configured peripheral
     also handles the logic behind adding actual sensors to our various services
     
     both are done in the same place because of choosing to store similar info in a single table rather than multiple
@@ -29,25 +30,22 @@ class PeripheralsManager:
 
     async def _monitor_sensor_loop(self, sensor: Sensor):
         """
-        Internal method: Runs an infinite loop specifically for ONE sensor.
+        Runs an infinite loop for the provided sensor arg. Upon successful reading, tthe loop waits for the sensor's defined frequency
         """
         while self.keep_running:
             try:
                 val = await sensor.read()
-                print("sensor loop val: ", val)
                 ts = time.time()
+                s = datetime.fromtimestamp(ts).strftime("%a %b %d %I:%M %p")
                 
                 if val is not None and self.on_sample is not None:
-                    maybe = self.on_sample(sensor.name, val, ts)
+                    print("sensor loop val: ", val)
+                    print("sensor loop time: ", s)
+                    maybe = self.on_sample(sensor, val, ts)
                     if asyncio.iscoroutine(maybe):
                         await maybe
-                    await asyncio.sleep(sensor.frequency)
                     
-                
-                # 2. (Optional) Send to Hypertable API here
-                # await self.db.save(val)
-                
-                
+                    await asyncio.sleep(sensor.frequency)
             except asyncio.CancelledError:
                 print(f"Stopping {sensor.name}...")
                 break
@@ -58,8 +56,10 @@ class PeripheralsManager:
 
     async def start_monitoring(self):
         """
-        Spawns a separate independent loop for every sensor.
+        Spawns a separate independent loop for every sensor. No actuator quite yet..
         """
+        
+        # a shared flag for our each of our parallel loops to utilize to know when to stop their infite exection
         self.keep_running = True
         print("Starting all sensor loops...")
         
@@ -82,6 +82,9 @@ class PeripheralsManager:
             task.cancel()
 
     async def run_peripherals(self):
+        """
+        Runs peripherals in parallel and cleans resorces when
+        """
         try:
             await self.start_monitoring()
         finally:
@@ -89,17 +92,17 @@ class PeripheralsManager:
             self.stop_monitoring()
             await asyncio.gather(*self.running_tasks, return_exceptions=True)
 
-async def main():
-    pin = "D4"
-    pin_obj=getattr(board, pin, None)
+# async def main():
+#     pin = "D4"
+#     pin_obj=getattr(board, pin, None)
     
-    s1 = DHT22(pin_obj=pin_obj,name="DHT22", frequency=30.0)
+#     s1 = DHT22(pin_obj=pin_obj,name="DHT22", frequency=30.0)
     
-    mgr = PeripheralsManager()
-    mgr.add_sensor(s1)
+#     mgr = Manager()
+#     mgr.add_sensor(s1)
 
-    await mgr.run_peripherals()
+#     await mgr.run_peripherals()
 
-if __name__ == "__main__":
-    print("running peripherals manager directly")
-    asyncio.run(main())
+# if __name__ == "__main__":
+#     print("running peripherals manager directly")
+#     asyncio.run(main())

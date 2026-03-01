@@ -5,7 +5,8 @@ python-dotenv>=1.0.0
 psycopg[binary]>=3.1.18
 psycopg-pool>=3.2.2
 
-# light
+# as7341 light sensor
+adafruit-circuitpython-as7341>=1.2.2
 
 # light and air
 adafruit-blinka >= 8.0.0
@@ -13,3 +14,4 @@ adafruit-blinka >= 8.0.0
 # air
 adafruit-circuitpython-dht>=4.0.0
 
+paho-mqtt==2.1.0

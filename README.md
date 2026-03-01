@@ -1,11 +1,17 @@
 
-# Raspberry Pi Garden
-
-An ioT project to monitor a greenhouse and predict how the environment will change based on actuator activation.
-
 ## Getting Started
 
-1. Create venv && install dependencies
+### GPIO Pin Setup
+
+gpio pin 17: toggles relay
+gpio pin 4: DHT-22 signal wire
+gpio pin 
+
+### Code Config
+
+get the ip address of the computer running the otther project witht the mqttt broker ()
+
+Create venv && install dependencies
 
 ```bash
 python -m .venv venv
@@ -14,18 +20,15 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-2. (Optional if you want cloud data persistance) Populate your example.env file with the tigercloud service credentials. Rename example.env to just .env
-
-Note if you don't go the cloud route, ensure the db related code is commented out.
-
-
-3. Run the script.
+Run the script
 
 ```bash
 python3 start.py
 ```
 
-## Data Analytics
+
+
+## Data Analysis Techniques
 
 Raw Sensor data is temporarily stored on this devicee. After a certain amount of time, we calculatte the following:
 
@@ -38,5 +41,5 @@ The raw and computed data is then persisted into the cloud - assuming you have v
 
 - Pi 4b
 - DHT-22
-- Humidifier Module
+- 3.3v Humidifier Module
 - 3.3v relay module
