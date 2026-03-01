@@ -8,6 +8,9 @@ class DHT22Adapter:
         self.a = analytics
 
     def on_sample(self,sensor: Sensor, value, ts: float):
+        """
+        a callback function thats passed to the manager class to then execute this callback whenever the dht22 collects data
+        """
         if not isinstance(sensor, DHT22):
             return
 

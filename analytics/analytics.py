@@ -1,17 +1,18 @@
 """
 analytics.py
 
-Temporarily holds raw + computed sensor data in memory and publishes rollups
-to MQTT every dt_sec (measured from the FIRST sample of an interval).
+Temporarily holds raw + computed sensor data in memory and publishes to MQTT
+every dt_sec (measured from the FIRST sample of an interval).
 
 Design:
 - Sensors call ingest_series(...) at their own cadence (e.g., every 30s).
 - Each ingest appends a point into an in-memory deque buffer for the current interval.
 - A flush loop waits until (interval_first_ts + dt_sec) and then:
-    1) builds rollups (mean/median/ewma) + controller suggestion
-    2) includes the buffered points
-    3) publishes payload via the provided async publisher
-- After publishing, the interval markers and buffer are reset.
+    1) builds summary payload (ts, interval, latest, rollups, control) and publishes
+       to the main topic via mqtt_publisher
+    2) builds points payload (ts, interval, points) and publishes to the points
+       topic via points_publisher
+    3) resets interval markers and buffer
 """
 
 from __future__ import annotations
@@ -54,6 +55,11 @@ def _env_opt_float(key: str) -> Optional[float]:
     if v is None or v.strip() == "":
         return None
     return float(v)
+
+
+def _round2(x: Optional[float]) -> Optional[float]:
+    """Round to 2 decimal places for payload readability."""
+    return round(x, 2) if x is not None else None
 
 
 def _parse_kv_floats(s: str) -> dict[str, float]:
@@ -101,7 +107,11 @@ class Analytics:
         in that interval (so you don't publish empty windows if sampling pauses).
     """
 
-    def __init__(self, mqtt_publisher: Optional[Publisher] = None) -> None:
+    def __init__(
+        self,
+        mqtt_publisher: Optional[Publisher] = None,
+        points_publisher: Optional[Publisher] = None,
+    ) -> None:
         load_dotenv()
 
         # publish interval
@@ -166,8 +176,9 @@ class Analytics:
         # point schema: {"ts": float, "series": {k: float}, "actuators": {k: bool}}
         self._buffer: Deque[dict[str, Any]] = deque(maxlen=self.buffer_max)
 
-        # sink
+        # sinks: summary on main topic, raw points on points topic
         self._publisher: Optional[Publisher] = mqtt_publisher
+        self._points_publisher: Optional[Publisher] = points_publisher
 
         # loop control
         self._flush_task: Optional[asyncio.Task] = None
@@ -242,9 +253,9 @@ class Analytics:
 
     def snapshot(self) -> dict[str, Any]:
         """
-        Current analytics snapshot (no publishing).
+        Current analytics snapshot (no publishing). Same shape as summary payload without interval.
         """
-        return self._build_payload(include_interval_meta=False, include_points=False)
+        return self._build_summary_payload(include_interval=False)
 
     # ---------------------------
     # Rollups / Accessors
@@ -311,14 +322,20 @@ class Analytics:
 
             # Only publish if we actually collected samples
             if self._interval_count > 0:
-                payload = self._build_payload(include_interval_meta=True, include_points=True)
+                summary = self._build_summary_payload(include_interval=True)
+                points_payload = self._build_points_payload()
 
                 if self._publisher is not None:
                     try:
-                        await self._publisher(payload)
+                        await self._publisher(summary)
                     except Exception as e:
-                        # Keep loop alive; you can add retries/backoff later.
                         print(f"[Analytics] publish error: {e}")
+
+                if self._points_publisher is not None:
+                    try:
+                        await self._points_publisher(points_payload)
+                    except Exception as e:
+                        print(f"[Analytics] points publish error: {e}")
 
             # Reset interval + buffer
             self._interval_first_ts = None
@@ -326,50 +343,52 @@ class Analytics:
             self._interval_count = 0
             self._buffer.clear()
 
-    def _build_payload(self, include_interval_meta: bool, include_points: bool) -> dict[str, Any]:
+    def _build_summary_payload(self, include_interval: bool = True) -> dict[str, Any]:
         """
-        Payload includes:
-          - raw_latest
-          - per-series rolling mean/median/ewma
-          - latest actuator states
-          - optional humidifier command recommendation
-          - optional interval meta (first/last ts, sample_count, dt_sec)
-          - optional points (the per-tick samples collected during the interval)
+        Summary payload (main topic): ts, optional interval, latest readings, rollups, control.
+        No points; use points topic for raw series.
         """
         series_keys = sorted(self._windows.keys())
-
         rollups: dict[str, dict[str, Optional[float]]] = {}
         for k in series_keys:
             rollups[k] = {
-                "mean": self.rolling_mean(k),
-                "median": self.rolling_median(k),
-                "ewma": self.ewma(k),
+                "mean": _round2(self.rolling_mean(k)),
+                "median": _round2(self.rolling_median(k)),
+                "ewma": _round2(self.ewma(k)),
             }
 
         cmd = self.humidifier_command(now_ts=self._interval_last_ts) if self.humidifier_enabled else None
+        control: dict[str, Any] = {"actuators": dict(self.actuators_latest)}
+        if cmd is not None:
+            control["humidifier"] = {"is_on": cmd[0], "reason": cmd[1]}
 
         payload: dict[str, Any] = {
-            "ts": time.time(),
-            "raw_latest": dict(self.raw_latest),
-            "actuators_latest": dict(self.actuators_latest),
+            "ts": round(time.time(), 2),
+            "latest": dict(self.raw_latest),
             "rollups": rollups,
+            "control": control,
         }
-
-        if cmd is not None:
-            payload["humidifier_command"] = {"is_on": cmd[0], "reason": cmd[1]}
-
-        if include_interval_meta:
+        if include_interval and self._interval_first_ts is not None and self._interval_last_ts is not None:
             payload["interval"] = {
                 "first_ts": self._interval_first_ts,
                 "last_ts": self._interval_last_ts,
                 "sample_count": self._interval_count,
                 "dt_sec": self.dt_sec,
             }
-
-        if include_points:
-            payload["points"] = list(self._buffer)
-
         return payload
+
+    def _build_points_payload(self) -> dict[str, Any]:
+        """Payload for points topic: ts, interval meta, and raw points array."""
+        return {
+            "ts": round(time.time(), 2),
+            "interval": {
+                "first_ts": self._interval_first_ts,
+                "last_ts": self._interval_last_ts,
+                "sample_count": self._interval_count,
+                "dt_sec": self.dt_sec,
+            },
+            "points": list(self._buffer),
+        }
 
     def _ensure_series(self, series: str) -> None:
         if series in self._windows:

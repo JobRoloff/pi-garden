@@ -2,31 +2,31 @@ import asyncio
 import time
 from datetime import datetime
 
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .sensor import Sensor
-from .dht22 import DHT22
-
-import board
 
 OnSample = Callable[[Sensor, Any, float], Any]
 
+
 class Manager:
     """
-    handles the scheduling of when to run each configured peripheral
-    also handles the logic behind adding actual sensors to our various services
-    
-    both are done in the same place because of choosing to store similar info in a single table rather than multiple
-    
+    Handles the scheduling of when to run each configured peripheral
+    and the logic behind adding sensors to our various services.
+
+    Callbacks are stored per sensor (keyed by sensor name) so each
+    peripheral type can use its own adapter.
     """
-    def __init__(self, on_sample: Optional[OnSample] = None):
+    def __init__(self):
         self.sensors: List[Sensor] = []
+        self.sensor_callbacks: Dict[str, OnSample] = {}
         self.running_tasks: List[asyncio.Task] = []
         self.keep_running = False
-        self.on_sample = on_sample
 
-    def add_sensor(self, sensor: Sensor):
+    def add_sensor(self, sensor: Sensor, on_sample: Optional[OnSample] = None):
         self.sensors.append(sensor)
+        if on_sample is not None:
+            self.sensor_callbacks[sensor.name] = on_sample
 
     async def _monitor_sensor_loop(self, sensor: Sensor):
         """
@@ -38,13 +38,14 @@ class Manager:
                 ts = time.time()
                 s = datetime.fromtimestamp(ts).strftime("%a %b %d %I:%M %p")
                 
-                if val is not None and self.on_sample is not None:
-                    print("sensor loop val: ", val)
-                    print("sensor loop time: ", s)
-                    maybe = self.on_sample(sensor, val, ts)
-                    if asyncio.iscoroutine(maybe):
-                        await maybe
-                    
+                if val is not None:
+                    on_sample = self.sensor_callbacks.get(sensor.name)
+                    if on_sample is not None:
+                        print("sensor loop val: ", val)
+                        print("sensor loop time: ", s)
+                        maybe = on_sample(sensor, val, ts)
+                        if asyncio.iscoroutine(maybe):
+                            await maybe
                     await asyncio.sleep(sensor.frequency)
             except asyncio.CancelledError:
                 print(f"Stopping {sensor.name}...")

@@ -8,8 +8,8 @@ from .sensor import Sensor
 
 @dataclass(frozen=True)
 class AS7341Reading:
-    violet_451 : int
     indigo_445: int
+    violet_451 : int
     blue_480: int
     cyan_515: int
     green_555: int

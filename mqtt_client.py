@@ -15,6 +15,7 @@ class MqttConfig:
     host: str
     port: int
     topic_pub: str
+    topic_pub_points: Optional[str] = None  # raw data points; default topic_pub + "/points"
     topic_sub: Optional[str] = None
     client_id: Optional[str] = None
     username: Optional[str] = None
@@ -49,6 +50,7 @@ class MqttClient:
       MQTT_HOST=localhost
       MQTT_PORT=1883
       MQTT_TOPIC_PUB=pi-garden/telemetry
+      MQTT_TOPIC_PUB_POINTS=pi-garden/telemetry/points   (optional; default: topic_pub + "/points")
       MQTT_TOPIC_SUB=pi-garden/commands   (optional)
       MQTT_CLIENT_ID=pi-garden-analytics  (optional)
       MQTT_USERNAME=...
@@ -113,6 +115,7 @@ class MqttClient:
         topic_pub = os.getenv("MQTT_TOPIC_PUB")
         if not topic_pub:
             raise ValueError("MQTT_TOPIC_PUB is empty. Set it to a real topic, e.g. pi-garden/telemetry")
+        topic_pub_points = os.getenv("MQTT_TOPIC_PUB_POINTS") or f"{topic_pub.rstrip('/')}/points"
         topic_sub = os.getenv("MQTT_TOPIC_SUB")  # optional
         client_id = os.getenv("MQTT_CLIENT_ID")
         username = os.getenv("MQTT_USERNAME")
@@ -126,6 +129,7 @@ class MqttClient:
             host=host,
             port=port,
             topic_pub=topic_pub,
+            topic_pub_points=topic_pub_points,
             topic_sub=topic_sub,
             client_id=client_id,
             username=username,
