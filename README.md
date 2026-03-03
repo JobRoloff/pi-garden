@@ -1,3 +1,10 @@
+# Raspberry Pi Garden Automation
+
+A project that controlls a greenhouse environment using sensors and motors.
+
+Data on sensor and motor usage is sent to an mqtt broker topic.
+
+See this [dockerized mqtt broker project](https://github.com/JobRoloff/PI-Garden-Data) that could be used right out of the box with this repo.
 
 ## Getting Started
 
@@ -12,9 +19,8 @@ sudo apt install -y libcamera-apps python3-picamera2
 
 ### GPIO Pin Setup
 
-gpio pin 17: toggles relay
+gpio pin 17: toggles humidifier relay
 gpio pin 4: DHT-22 signal wire
-gpio pin 
 
 ### Code Config
 
@@ -36,16 +42,12 @@ Run the script
 python3 start.py
 ```
 
-
-
 ## Data Analysis Techniques
 
-Raw Sensor data is temporarily stored on this devicee. After a certain amount of time, we calculatte the following:
+Raw Sensor and Actuator data is temporarily stored on this devicee. After a certain amount of time, we calculatte the following:
 
 - Rolling mean / median
 - Ewma / exponential smoothing
-
-The raw and computed data is then persisted into the cloud - assuming you have valid tigercloud credentials in your .env file  
 
 ## Hardware
 
@@ -55,3 +57,7 @@ The raw and computed data is then persisted into the cloud - assuming you have v
 - Arducam OwlSight Camera Module
 - 3.3v Humidifier Module
 - 3.3v relay module
+
+## Project Image(s)
+
+![Garden Setup 3-3-26](./assets/pi-garden.png)
