@@ -236,6 +236,33 @@ class Analytics:
             }
         )
 
+    def ingest_actuator_event(
+        self,
+        name: str,
+        value: bool,
+        reason: str,
+        ts: float,
+        *,
+        duration_s: Optional[float] = None,
+    ) -> None:
+        """
+        Record a single actuator command as a time-series event.
+        Use this when a controller applies a command (e.g. humidifier on/off).
+        Events are appended to the same interval buffer as sensor points and
+        published on the points topic, so downstream can correlate with sensor data.
+        """
+        self.actuators_latest[name] = value
+        self._buffer.append(
+            {
+                "ts": ts,
+                "type": "actuator",
+                "name": name,
+                "value": value,
+                "reason": reason,
+                "duration_s": _round2(duration_s) if duration_s is not None else None,
+            }
+        )
+
     async def start(self) -> None:
         """Start the periodic flush loop."""
         if self._running:

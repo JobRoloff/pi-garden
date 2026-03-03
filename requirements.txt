@@ -14,4 +14,7 @@ adafruit-blinka >= 8.0.0
 # air
 adafruit-circuitpython-dht>=4.0.0
 
+# camera. these might be system deps rather than repo deps
+picamera2
+
 paho-mqtt==2.1.0

@@ -4,7 +4,8 @@ from datetime import datetime
 
 from typing import Any, Callable, Dict, List, Optional
 
-from .sensor import Sensor
+from .sensors import Sensor
+from .actuators import Actuator
 
 OnSample = Callable[[Sensor, Any, float], Any]
 
@@ -23,10 +24,21 @@ class Manager:
         self.running_tasks: List[asyncio.Task] = []
         self.keep_running = False
 
+        # Actuators managed alongside sensors (for cleanup and future orchestration)
+        self.actuators: List[Actuator] = []
+
     def add_sensor(self, sensor: Sensor, on_sample: Optional[OnSample] = None):
         self.sensors.append(sensor)
         if on_sample is not None:
             self.sensor_callbacks[sensor.name] = on_sample
+
+    def add_actuator(self, actuator: Actuator) -> None:
+        """
+        Register an actuator with the manager so it can be tracked and
+        cleaned up on shutdown. Higher-level controllers are still
+        responsible for deciding when to issue commands.
+        """
+        self.actuators.append(actuator)
 
     async def _monitor_sensor_loop(self, sensor: Sensor):
         """
@@ -93,17 +105,10 @@ class Manager:
             self.stop_monitoring()
             await asyncio.gather(*self.running_tasks, return_exceptions=True)
 
-# async def main():
-#     pin = "D4"
-#     pin_obj=getattr(board, pin, None)
-    
-#     s1 = DHT22(pin_obj=pin_obj,name="DHT22", frequency=30.0)
-    
-#     mgr = Manager()
-#     mgr.add_sensor(s1)
+            # Ensure actuators get a chance to release GPIO/resources
+            for actuator in self.actuators:
+                try:
+                    await actuator.aclose()
+                except Exception as e:
+                    print(f"Error closing actuator {actuator.name}: {e}")
 
-#     await mgr.run_peripherals()
-
-# if __name__ == "__main__":
-#     print("running peripherals manager directly")
-#     asyncio.run(main())

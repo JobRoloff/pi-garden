@@ -1,6 +1,6 @@
 from analytics import Analytics
-from peripherals.sensor import Sensor
-from peripherals.dht22 import DHT22, DHTReading
+from peripherals import Sensor, DHT22
+from peripherals.sensors.dht22 import DHTReading
 
 class DHT22Adapter:
     """DHT22 reads two floats. This class formats the floats into a series which we could then use in our data ingestion pipeline"""

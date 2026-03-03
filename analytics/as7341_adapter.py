@@ -1,6 +1,6 @@
 from analytics import Analytics
-from peripherals.sensor import Sensor
-from peripherals.as7341 import AS7341Module, AS7341Reading
+from peripherals import Sensor 
+from peripherals.sensors.as7341 import AS7341Module, AS7341Reading
 
 class AS7341Adapter:
     """

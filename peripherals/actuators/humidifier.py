@@ -1,8 +1,11 @@
-#!/usr/bin/env python3
 from gpiozero import DigitalOutputDevice
 from time import sleep
+from .actuator import Actuator
 
-class HumidifierService:
+class Humidifier(Actuator):
+    def __init__():
+        return
+    
     def test(self): 
         print("test")
     def run(self):

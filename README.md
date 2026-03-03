@@ -1,6 +1,15 @@
 
 ## Getting Started
 
+### System Dependencies
+
+In order to use the camera, you gotta manually install the following
+
+```bash
+sydo apt update
+sudo apt install -y libcamera-apps python3-picamera2
+```
+
 ### GPIO Pin Setup
 
 gpio pin 17: toggles relay
@@ -14,7 +23,8 @@ get the ip address of the computer running the otther project witht the mqttt br
 Create venv && install dependencies
 
 ```bash
-python -m .venv venv
+# note the system site packages are there for if you're using the camera module as well. This flass gives the venv access to system site-packages
+python -m .venv venv --system-site-packages
 source .venv/bin/activate
 
 pip install -r requirements.txt
@@ -41,5 +51,7 @@ The raw and computed data is then persisted into the cloud - assuming you have v
 
 - Pi 4b
 - DHT-22
+- AS73141 10 channel light sensor
+- Arducam OwlSight Camera Module
 - 3.3v Humidifier Module
 - 3.3v relay module
