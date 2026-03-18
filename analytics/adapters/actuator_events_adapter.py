@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from .analytics import Analytics
+from ..analytics import Analytics
 from peripherals.actuators.actuator import Actuator, ActuatorCommand
 
 

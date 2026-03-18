@@ -20,81 +20,21 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from dataclasses import dataclass
 from collections import deque
-from math import exp
-from statistics import median
 from typing import Any, Awaitable, Callable, Deque, Mapping, Optional, Tuple
 
-from dotenv import load_dotenv
+from .config import AnalyticsConfig
+from .env_helpers import _round2
+from .hystersis.config import HysteresisConfig
+from .hystersis.state import HysteresisState
+from .rolling_stats import RollingStats
 
-# --- Types ---
-Publisher = Callable[[dict], Awaitable[None]]  # async sink for flush payloads
-
-
-# --- Helpers ---
-def _env_bool(key: str, default: bool) -> bool:
-    v = os.getenv(key)
-    if v is None:
-        return default
-    return v.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
-
-
-def _env_int(key: str, default: int) -> int:
-    v = os.getenv(key)
-    return default if v is None else int(v)
-
-
-def _env_float(key: str, default: float) -> float:
-    v = os.getenv(key)
-    return default if v is None else float(v)
-
-
-def _env_opt_float(key: str) -> Optional[float]:
-    v = os.getenv(key)
-    if v is None or v.strip() == "":
-        return None
-    return float(v)
-
-
-def _round2(x: Optional[float]) -> Optional[float]:
-    """Round to 2 decimal places for payload readability."""
-    return round(x, 2) if x is not None else None
-
-
-def _parse_kv_floats(s: str) -> dict[str, float]:
-    """
-    Parse "temp=5,humidity=15" -> {"temp": 5.0, "humidity": 15.0}
-    """
-    out: dict[str, float] = {}
-    s = s.strip()
-    if not s:
-        return out
-    parts = [p.strip() for p in s.split(",") if p.strip()]
-    for p in parts:
-        if "=" not in p:
-            raise ValueError(f"Invalid clamp entry '{p}'. Use key=value.")
-        k, v = p.split("=", 1)
-        out[k.strip()] = float(v.strip())
-    return out
-
-
-# --- Controller config/state ---
-@dataclass
-class HysteresisConfig:
-    low: float
-    high: float
-    debounce_sec: float = 0.0
-    min_on_sec: float = 0.0
-    min_off_sec: float = 0.0
-
-
-@dataclass
-class HysteresisState:
-    is_on: bool = False
-    last_change_ts: float = 0.0
-    pending_switch: Optional[bool] = None
-    pending_since_ts: float = 0.0
+"""
+A publisher can be called like a function. For this reason, we use the Callable type annotation.
+The Callable type annotation takes 2 args: a list of arguments for the callable, a return type
+A callable will be useful in this program for when we  
+"""
+Publisher = Callable[[dict], Awaitable[None]]
 
 
 class Analytics:
@@ -111,61 +51,36 @@ class Analytics:
         self,
         mqtt_publisher: Optional[Publisher] = None,
         points_publisher: Optional[Publisher] = None,
+        config: Optional[AnalyticsConfig] = None,
     ) -> None:
-        load_dotenv()
+        self.config = config or AnalyticsConfig.from_env()
 
         # publish interval
-        self.dt_sec = float(_env_float("ANALYTICS_DT_SEC", 60.0 * 5))
-        if self.dt_sec <= 0:
-            raise ValueError("ANALYTICS_DT_SEC must be > 0")
+        self.dt_sec = self.config.dt_sec
 
         # rolling window size (count of samples)
-        self.window = int(_env_int("ANALYTICS_WINDOW", 15))
-        if self.window <= 0:
-            raise ValueError("ANALYTICS_WINDOW must be > 0")
+        self.window = self.config.window
 
         # per-interval buffer size (points, not seconds)
-        self.buffer_max = int(_env_int("ANALYTICS_BUFFER_MAX", 5000))
-        if self.buffer_max <= 0:
-            raise ValueError("ANALYTICS_BUFFER_MAX must be > 0")
+        self.buffer_max = self.config.buffer_max
 
         # EWMA config
-        ewma_alpha = _env_opt_float("ANALYTICS_EWMA_ALPHA")
-        ewma_tau = _env_opt_float("ANALYTICS_EWMA_TAU_SEC")
-        if ewma_alpha is not None:
-            if not (0.0 < ewma_alpha <= 1.0):
-                raise ValueError("ANALYTICS_EWMA_ALPHA must be in (0, 1]")
-            self.ewma_alpha = float(ewma_alpha)
-        else:
-            # tau-based alpha with dt_sec; if tau missing, reasonable default
-            if ewma_tau is not None and ewma_tau > 0:
-                self.ewma_alpha = 1.0 - exp(-self.dt_sec / ewma_tau)
-            else:
-                self.ewma_alpha = 0.2
+        self.ewma_alpha = self.config.ewma_alpha
 
         # clamp thresholds
-        clamp_str = os.getenv("ANALYTICS_CLAMP_JUMPS", "")
-        self.clamp_jumps: dict[str, float] = _parse_kv_floats(clamp_str)
+        self.clamp_jumps: dict[str, float] = self.config.clamp_jumps
 
         # Optional humidifier controller
-        self.humidifier_enabled = _env_bool("HUMIDIFIER_ENABLED", False)
-        self.humidifier_cfg = HysteresisConfig(
-            low=_env_float("HUMIDIFIER_LOW", 55.0),
-            high=_env_float("HUMIDIFIER_HIGH", 62.0),
-            debounce_sec=_env_float("HUMIDIFIER_DEBOUNCE_SEC", 0.0),
-            min_on_sec=_env_float("HUMIDIFIER_MIN_ON_SEC", 0.0),
-            min_off_sec=_env_float("HUMIDIFIER_MIN_OFF_SEC", 0.0),
-        )
+        self.humidifier_enabled = self.config.humidifier_enabled
+        self.humidifier_cfg = self.config.humidifier_cfg
         self.humidifier_state = HysteresisState(is_on=False, last_change_ts=0.0)
 
         # Latest raw values (post clamp)
         self.raw_latest: dict[str, float] = {}
         self.actuators_latest: dict[str, bool] = {}
 
-        # Per-series rolling structures (lazy)
-        self._windows: dict[str, Deque[float]] = {}
-        self._sums: dict[str, float] = {}
-        self._ewma: dict[str, Optional[float]] = {}
+        # Per-series rolling metrics (lazy)
+        self._rolling = RollingStats(window=self.window, ewma_alpha=self.ewma_alpha)
 
         # Interval tracking
         self._interval_first_ts: Optional[float] = None
@@ -173,7 +88,25 @@ class Analytics:
         self._interval_count: int = 0
 
         # Buffer of points for THIS interval
-        # point schema: {"ts": float, "series": {k: float}, "actuators": {k: bool}}
+        # point schema (discriminated union):
+        #   - Sensor reading:
+        #       {
+        #         "timestamp": <float>,
+        #         "kind": "sensor_reading",
+        #         "sensor_id": "<id>",
+        #         "sensor_type": "<type>",
+        #         "series": { <measurement_name>: <number>, ... },
+        #         "actuators": { <actuator_id>: <bool|number>, ... },
+        #       }
+        #   - Actuator event:
+        #       {
+        #         "timestamp": <float>,
+        #         "kind": "actuator_event",
+        #         "actuator_id": "<id>",
+        #         "value": <bool|number>,
+        #         "reason": "<string>",
+        #         "requested_duration_s": <float|null>,
+        #       }
         self._buffer: Deque[dict[str, Any]] = deque(maxlen=self.buffer_max)
 
         # sinks: summary on main topic, raw points on points topic
@@ -193,6 +126,8 @@ class Analytics:
         *,
         now_ts: Optional[float] = None,
         actuators: Optional[Mapping[str, bool]] = None,
+        sensor_id: Optional[str] = None,
+        sensor_type: Optional[str] = None,
     ) -> None:
         """
         Ingest normalized series values for this tick.
@@ -223,14 +158,15 @@ class Analytics:
             self.raw_latest[name] = v
             tick_series[name] = v
 
-            self._ensure_series(name)
-            self._push_value(name, v)
-            self._ewma_update(name, v)
+            self._rolling.update(name, v)
 
-        # append a point to the interval buffer (only keys provided this tick)
+        # append a sensor_reading point to the interval buffer (only keys provided this tick)
         self._buffer.append(
             {
-                "ts": now,
+                "timestamp": now,
+                "kind": "sensor_reading",
+                "sensor_id": sensor_id,
+                "sensor_type": sensor_type,
                 "series": tick_series,
                 "actuators": dict(self.actuators_latest),
             }
@@ -252,14 +188,15 @@ class Analytics:
         published on the points topic, so downstream can correlate with sensor data.
         """
         self.actuators_latest[name] = value
+        # append an actuator_event point to the interval buffer
         self._buffer.append(
             {
-                "ts": ts,
-                "type": "actuator",
-                "name": name,
+                "timestamp": ts,
+                "kind": "actuator_event",
+                "actuator_id": name,
                 "value": value,
                 "reason": reason,
-                "duration_s": _round2(duration_s) if duration_s is not None else None,
+                "requested_duration_s": _round2(duration_s) if duration_s is not None else None,
             }
         )
 
@@ -278,29 +215,17 @@ class Analytics:
             await asyncio.gather(self._flush_task, return_exceptions=True)
             self._flush_task = None
 
-    def snapshot(self) -> dict[str, Any]:
-        """
-        Current analytics snapshot (no publishing). Same shape as summary payload without interval.
-        """
-        return self._build_summary_payload(include_interval=False)
-
     # ---------------------------
     # Rollups / Accessors
     # ---------------------------
     def rolling_mean(self, series: str) -> Optional[float]:
-        w = self._windows.get(series)
-        if not w:
-            return None
-        return self._sums[series] / len(w)
+        return self._rolling.mean(series)
 
     def rolling_median(self, series: str) -> Optional[float]:
-        w = self._windows.get(series)
-        if not w:
-            return None
-        return float(median(w))
+        return self._rolling.median(series)
 
     def ewma(self, series: str) -> Optional[float]:
-        return self._ewma.get(series)
+        return self._rolling.ewma(series)
 
     # ---------------------------
     # Humidifier controller (optional)
@@ -375,7 +300,7 @@ class Analytics:
         Summary payload (main topic): ts, optional interval, latest readings, rollups, control.
         No points; use points topic for raw series.
         """
-        series_keys = sorted(self._windows.keys())
+        series_keys = sorted(self._rolling.series_keys())
         rollups: dict[str, dict[str, Optional[float]]] = {}
         for k in series_keys:
             rollups[k] = {
@@ -416,28 +341,6 @@ class Analytics:
             },
             "points": list(self._buffer),
         }
-
-    def _ensure_series(self, series: str) -> None:
-        if series in self._windows:
-            return
-        self._windows[series] = deque(maxlen=self.window)
-        self._sums[series] = 0.0
-        self._ewma[series] = None
-
-    def _push_value(self, series: str, value: float) -> None:
-        w = self._windows[series]
-        if len(w) == w.maxlen:
-            self._sums[series] -= w[0]
-        w.append(value)
-        self._sums[series] += value
-
-    def _ewma_update(self, series: str, x: float) -> None:
-        prev = self._ewma[series]
-        if prev is None:
-            self._ewma[series] = x
-            return
-        a = self.ewma_alpha
-        self._ewma[series] = a * x + (1.0 - a) * prev
 
     def _clamp_jump(self, series: str, x: float) -> float:
         """

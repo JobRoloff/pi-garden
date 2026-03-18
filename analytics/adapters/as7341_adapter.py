@@ -1,4 +1,4 @@
-from analytics import Analytics
+from ..analytics import Analytics
 from peripherals import Sensor 
 from peripherals.sensors.as7341 import AS7341Module, AS7341Reading
 
@@ -25,6 +25,9 @@ class AS7341Adapter:
                     "orange_630": value.orange_630,
                     "red_680": value.red_680,
                     "clear": value.clear,
-                    "near_ir": value.near_ir
-                }
+                    "near_ir": value.near_ir,
+                },
+                now_ts=ts,
+                sensor_id=sensor.name,
+                sensor_type=type(sensor).__name__,
             )

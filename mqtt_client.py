@@ -1,6 +1,5 @@
 import os
 import json
-import time
 import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
@@ -45,56 +44,27 @@ class MqttClient:
     - background network loop
     - auto reconnect
     - simple publish_json() helper
-
-    Typical env vars:
-      MQTT_HOST=localhost
-      MQTT_PORT=1883
-      MQTT_TOPIC_PUB=pi-garden/telemetry
-      MQTT_TOPIC_PUB_POINTS=pi-garden/telemetry/points   (optional; default: topic_pub + "/points")
-      MQTT_TOPIC_SUB=pi-garden/commands   (optional)
-      MQTT_CLIENT_ID=pi-garden-analytics  (optional)
-      MQTT_USERNAME=...
-      MQTT_PASSWORD=...
-      MQTT_QOS=1
-      MQTT_RETAIN=false
-      MQTT_TLS=false
-      MQTT_KEEPALIVE=60
     """
 
     def __init__(
         self,
-        env_path: Optional[str] = None,
-        config: Optional[MqttConfig] = None,
         on_message: Optional[Callable[[str, bytes], None]] = None,
         logger: Optional[Callable[[str], None]] = None,
     ):
         self._log = logger or (lambda msg: None)
-
-        # Load env first (unless caller passes config explicitly)
-        if env_path:
-            load_dotenv(env_path)
-        else:
-            load_dotenv()
-
-        self.cfg = config or self._config_from_env()
+        load_dotenv()
+        self.config = self._config_from_env()
         self._user_on_message = on_message
 
         # Use v2 callback API when available; fall back gracefully.
         try:
             self._client = mqtt.Client(
-                client_id=self.cfg.client_id or "",
+                client_id="",
             )
             self._cb_v2 = True
         except Exception:
-            self._client = mqtt.Client(client_id=self.cfg.client_id or "")
+            self._client = mqtt.Client(client_id="")
             self._cb_v2 = False
-
-        if self.cfg.username:
-            self._client.username_pw_set(self.cfg.username, self.cfg.password)
-
-        # Optional TLS toggle
-        if self.cfg.tls:
-            self._client.tls_set()  # uses default system CA certs
 
         # Paho callbacks
         self._client.on_connect = self._on_connect_v2
@@ -116,7 +86,7 @@ class MqttClient:
         if not topic_pub:
             raise ValueError("MQTT_TOPIC_PUB is empty. Set it to a real topic, e.g. pi-garden/telemetry")
         topic_pub_points = os.getenv("MQTT_TOPIC_PUB_POINTS") or f"{topic_pub.rstrip('/')}/points"
-        topic_sub = os.getenv("MQTT_TOPIC_SUB")  # optional
+        topic_sub = os.getenv("MQTT_TOPIC_SUB")
         client_id = os.getenv("MQTT_CLIENT_ID")
         username = os.getenv("MQTT_USERNAME")
         password = os.getenv("MQTT_PASSWORD")
@@ -152,7 +122,7 @@ class MqttClient:
         self._last_connect_err = None
 
         try:
-            self._client.connect(self.cfg.host, self.cfg.port, keepalive=self.cfg.keepalive)
+            self._client.connect(self.config.host, self.config.port, keepalive=self.config.keepalive)
         except Exception as e:
             self._last_connect_err = str(e)
             self._log(f"[mqtt] connect() failed: {e}")
@@ -195,9 +165,9 @@ class MqttClient:
         if not self.is_connected():
             raise RuntimeError("MQTT client is not connected")
 
-        t = topic or self.cfg.topic_pub
-        q = self.cfg.qos if qos is None else qos
-        r = self.cfg.retain if retain is None else retain
+        t = topic or self.config.topic_pub
+        q = self.config.qos if qos is None else qos
+        r = self.config.retain if retain is None else retain
 
         if isinstance(payload, str):
             payload = payload.encode("utf-8")
@@ -222,27 +192,16 @@ class MqttClient:
             retain=retain,
         )
 
-    def subscribe(self, topic: Optional[str] = None, qos: Optional[int] = None) -> None:
-        """
-        Subscribe to topic (defaults to MQTT_TOPIC_SUB if set).
-        """
-        t = topic or self.cfg.topic_sub
-        if not t:
-            raise ValueError("No subscribe topic provided and MQTT_TOPIC_SUB is not set")
-
-        q = self.cfg.qos if qos is None else qos
-        self._client.subscribe(t, q)
-
     # ---------- Callbacks (v2 and v1) ----------
 
     # V2 signatures (paho-mqtt >= 2.x)
     def _on_connect_v2(self, client, userdata, flags, reason_code, properties=None):
         if reason_code == 0:
-            self._log(f"[mqtt] connected to {self.cfg.host}:{self.cfg.port}")
+            self._log(f"[mqtt] connected to {self.config.host}:{self.config.port}")
             self._connected.set()
             # Auto-subscribe if configured
-            if self.cfg.topic_sub:
-                client.subscribe(self.cfg.topic_sub, self.cfg.qos)
+            if self.config.topic_sub:
+                client.subscribe(self.config.topic_sub, self.config.qos)
         else:
             self._last_connect_err = f"connect reason_code={reason_code}"
             self._log(f"[mqtt] connect failed: {self._last_connect_err}")
@@ -255,9 +214,5 @@ class MqttClient:
         self._log(f"[mqtt] disconnected (reason_code={reason_code}); will auto-reconnect")
 
     def _on_message_v2(self, client, userdata, msg: mqtt.MQTTMessage):
-        if self._user_on_message:
-            self._user_on_message(msg.topic, msg.payload)
-
-   
         if self._user_on_message:
             self._user_on_message(msg.topic, msg.payload)

@@ -1,4 +1,4 @@
-from analytics import Analytics
+from ..analytics import Analytics
 from peripherals import Sensor, DHT22
 from peripherals.sensors.dht22 import DHTReading
 
@@ -18,8 +18,15 @@ class DHT22Adapter:
             self.a.ingest_series(
                 {"temp": value.temperature_c, "humidity": value.humidity_pct},
                 now_ts=ts,
+                sensor_id=sensor.name,
+                sensor_type=type(sensor).__name__,
             )
         else:
             # fallback if you ever switch to tuple returns
             temp_c, humidity_pct = value
-            self.a.ingest_series({"temp": temp_c, "humidity": humidity_pct}, now_ts=ts)
+            self.a.ingest_series(
+                {"temp": temp_c, "humidity": humidity_pct},
+                now_ts=ts,
+                sensor_id=sensor.name,
+                sensor_type=type(sensor).__name__,
+            )

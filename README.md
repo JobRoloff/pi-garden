@@ -14,7 +14,7 @@ In order to use the camera, you gotta manually install the following
 
 ```bash
 sydo apt update
-sudo apt install -y libcamera-apps python3-picamera2
+sudo apt install -y libcamera-apps python3-picamera2 libcap-dev
 ```
 
 ### GPIO Pin Setup
@@ -24,13 +24,13 @@ gpio pin 4: DHT-22 signal wire
 
 ### Code Config
 
-get the ip address of the computer running the otther project witht the mqttt broker ()
+Set `MQTT_HOST` in `.env` to the IP of the machine running the MQTT broker (e.g. `192.168.1.27` for the dockerized broker).
 
 Create venv && install dependencies
 
 ```bash
 # note the system site packages are there for if you're using the camera module as well. This flass gives the venv access to system site-packages
-python -m .venv venv --system-site-packages
+python -m venv .venv --system-site-packages
 source .venv/bin/activate
 
 pip install -r requirements.txt
